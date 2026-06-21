@@ -1,29 +1,48 @@
-# AMSI_Bypass
+# AMSI (Anti-Malware Scan Interface) Mechanics & Bypass Theory
 
-A small research repository focused on the Antimalware Scan Interface (AMSI) and related detection techniques.
+AMSI (Anti-Malware Scan Interface) is a core Windows security feature. When PowerShell starts, Windows loads `amsi.dll` into the PowerShell process space. 
 
-This repository is intended for defensive research, detection testing, and educational purposes only. It does not provide step-by-step instructions for bypassing security controls.
+Before executing any script content, PowerShell passes the code to the following functions inside `amsi.dll`:
 
-## Disclaimer
+* **`AmsiScanBuffer(scriptContent)`** → Returns `CLEAN` (0) or `MALICIOUS` (1+)
+* **`AmsiScanString(scriptContent)`** → Returns `CLEAN` (0) or `MALICIOUS` (1+)
+* **`AmsiOpenSession(...)`** → Initializes a scan session
 
-- Use the contents of this repository only in environments where you have explicit permission to test (such as a lab or an approved test network).
-- The author and contributors are not responsible for misuse of the information provided here.
-- If you are unsure whether your intended use is permitted, obtain authorization before proceeding.
+> [!IMPORTANT]
+> If any of these functions return a value indicating `MALICIOUS`, PowerShell immediately blocks execution of the script.
 
-## Contributing
+---
 
-Contributions are welcome. Please open an issue or submit a pull request to:
+## The Memory Patching Technique
 
-- correct typos or improve documentation
-- add non-actionable analysis or detection guidance
-- provide reproducible research that follows responsible disclosure practices
+The bypass technique patches these functions directly in the process memory so they always return `CLEAN` (0), regardless of what script content is actually passed to them.
 
-When contributing, avoid adding content that provides step-by-step bypass techniques or that could be misused outside of authorized testing environments.
+### Step-by-Step Mechanism
 
-## Contact
+1. **Locate the Functions:** Get the memory address of each target function in `amsi.dll` via:
+   ```c
+   GetProcAddress(GetModuleHandle("amsi.dll"), "AmsiScanBuffer")
 
-For questions or responsible-disclosure reports, open an issue or contact the repository owner.
+``
 
-## License
+2. **Modify Memory Permissions:** Change the memory protection of the target address from read-only to writable and executable using `VirtualProtect` with the `PAGE_EXECUTE_READWRITE` (`0x40`) flag.
+3. **Overwrite with Assembly:** Overwrite the first few bytes of the function with machine code that forces an early, clean exit:
+```assembly
+xor eax, eax    ; Set return value register to 0 (AMSI_RESULT_CLEAN)
+ret             ; Return immediately
 
-See the LICENSE file in this repository for license details, if present.
+```
+
+
+* **x64 Hex:** `31 C0 C3`
+* **x86 Hex:** `31 C0 C2 18 00`
+
+
+4. **Restore Permissions:** Restore the original memory protection flags to avoid leaving anomalous `RWX` pages.
+5. **Managed Flag Fallback:** Set `amsiInitFailed = true` via .NET reflection on `System.Management.Automation.AmsiUtils`. This is a separate managed internal flag that tells the runtime: *"AMSI failed to initialize, skip scanning entirely."*
+
+---
+
+## Result
+
+Every script that subsequently passes through AMSI receives a `CLEAN` status instantly. Because the patched functions return `0` at the very beginning of their execution, the underlying anti-malware engine is never actually called to scan the content.
