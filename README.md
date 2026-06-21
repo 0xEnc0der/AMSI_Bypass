@@ -1,5 +1,4 @@
-# AMSI (Anti-Malware Scan Interface) Mechanics & Bypass Theory
-
+# AMSI (Anti-Malware Scan Interface) 
 AMSI (Anti-Malware Scan Interface) is a core Windows security feature. When PowerShell starts, Windows loads `amsi.dll` into the PowerShell process space. 
 
 Before executing any script content, PowerShell passes the code to the following functions inside `amsi.dll`:
